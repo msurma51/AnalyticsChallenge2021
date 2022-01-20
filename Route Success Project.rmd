@@ -19,9 +19,9 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
 ```{r load_datal}
-game_data <- fread("GameInfo.csv")
-play_data <- fread("PlayByPlay.csv")
-route_data <- fread("SkillPositionPlayers.csv")
+game_data <- fread("Data/GameInfo.csv")
+play_data <- fread("Data/PlayByPlay.csv")
+route_data <- fread("Data/SkillPositionPlayers.csv")
 ```
 
 ## Including Plots
@@ -208,6 +208,23 @@ is_flat <- function(route) {
   else {return(FALSE)}
   
 }
+
+contains_route <- function(rte_set,vector) {
+  for (route in rte_set) {
+    if (route %in% vector)
+      return(TRUE)
+  }
+  return(FALSE)  
+}
+
+contains_all_routes <- function(rte_set,vector) {
+  for (route in rte_set) {
+    if (route %in% vector) {}
+    else 
+      return(FALSE)
+  }
+  return(TRUE)
+}
 ```
 
 ```{r}
@@ -228,10 +245,28 @@ concept_namer <- function(concept_list) {
            )
     return("Option")
     #2 wheel
-  else if (concept[1] %in% c("Curl", "Chip - Curl", "Out", "Whip") &
+  else if (concept[1] %in% c("Chip - Curl", "Out", "Whip") &
            concept[2] == "Wheel"
            )
     return("Option")
+  
+  # Boot
+  else if (concept[1] == "Comeback" &
+           (concept[2] == "Whip" |
+           is_flat(concept[2])))
+    return("Boot")
+    # Smash
+  else if (contains_all_routes(c("Corner", "Chip - Flat"),concept))
+    return ("Boot Smash")
+    # Sail
+  else if (contains_all_routes(c("Out", "Chip - Flat"),concept))
+    return ("Boot Sail")
+  else if (concept[1] %in% c("Post", "Fade", "Go/Fly") &
+           concept[2] == "Chip - Flat")
+    return ("Boot Lift")
+    # Back-side 
+  else if (contains_all_routes(c("Drag","Deep Cross"),concept))
+    return ("Back-Side Boot")
   
   # Smash - normal
   else if ((concept[1] %in% c("Curl", "Dig", "Out", "Whip") |
@@ -253,11 +288,15 @@ concept_namer <- function(concept_list) {
           )
     return("Hash")
   
-  # Double Slant
+  # Double Slant 
   else if (concept[1] %in% c("Slant", "Angle") &
-           concept[2] %in% c("Slant", "Angle", "Curl", "Over Ball", "Pick")
-           )
+           concept[2] %in% c("Slant", "Angle"))
     return("Double Slant")
+  
+  # Slant Spacing
+  else if (concept[1] %in% c("Slant", "Angle") &
+           concept[2] %in% c("Curl", "Over Ball", "Pick"))
+    return("Slant Spacing")
   
   # Levels
   else if (concept[1] %in% c("Dig", "Slant", "Curl", "Out", "Whip",
@@ -285,7 +324,7 @@ concept_namer <- function(concept_list) {
   
   # Grab
   else if (concept[1] %in% c("Post","Seam") &
-           concept[2] %in% c("Out","Whip","Curl"))
+           concept[2] %in% c("Out","Whip","Curl","Chip - Curl"))
     return("Grab")
   
   # Slant-Slide
@@ -299,12 +338,12 @@ concept_namer <- function(concept_list) {
     return("Pinwheel")
   
   # Spacing
-  else if (concept[1] %in% c("Curl", "Dig", "Out", "Fade") &
-           concept[2] == "Over Ball")
+  else if (concept[1] %in% c("Curl", "Dig", "Out", "Fade", "Whip", "Pick") &
+           concept[2] %in% c("Over Ball", "Pick", "Curl", "Chip - Curl"))
     return("Spacing")
   
   # Spot (w/ Ball Route)
-  else if (concept[1] %in% c("Drag", "Over Ball", "Chip - Curl") &
+  else if (concept[1] %in% c("Over Ball", "Chip - Curl") &
            concept[2] %in% c("Corner", "Fade", "Out")
            )
     return("Spot")
@@ -314,8 +353,8 @@ concept_namer <- function(concept_list) {
     return("Spot")
   
   # Drive
-  else if (concept[1] %in% c("Dig", "Curl", "Drag", "Over Ball") &
-           concept[2] %in% c("Dig", "Curl", "Drag", "Over Ball")
+  else if (concept[1] %in% c("Drag","Over Ball") &
+           concept[2] %in% c("Dig", "Curl", "Over Ball")
            )
     return("Drive")
   
@@ -329,8 +368,7 @@ concept_namer <- function(concept_list) {
   
   # Vert Switch
   else if (concept[1] %in% c("Post", "Seam", "Go/Fly", "Fade") &
-           concept[2] %in% c("Wheel", "Fade", "Fade - Back Shoulder",
-                             "Comeback")
+           concept[2] %in% c("Wheel", "Fade", "Fade - Back Shoulder")
           )
     return("Vert Switch")
   
@@ -356,13 +394,13 @@ concept_namer <- function(concept_list) {
   
   # Dbl Post
   else if ((concept[1] %in% c("Post", "Seam") &
-            concept[2] %in% c("Post", "Seam")) &
+            concept[2] %in% c("Post", "Seam", "Chip - Seam")) &
            "Post" %in% concept)
     return("Double Post")
   
   # Choice
   else if (concept[1] %in% c("Post", "Seam") &
-           concept[2] %in% c("Dig", "Curl", "Chip - Curl"))
+           concept[2] %in% c("Dig", "Curl"))
     return("Choice")
   
   # Double Seam
@@ -371,7 +409,8 @@ concept_namer <- function(concept_list) {
     return("Double Seam")
   
   # Sticks
-  else if (concept[1] %in% c("Curl", "Chip - Curl", "Comeback", "Out") &
+  else if (concept[1] %in% c("Curl", "Chip - Curl", "Comeback", "Out",
+                             "Go/Fly", "Fade") &
            concept[2] %in% c("Curl", "Chip - Curl", "Comeback", "Out"))
     return("Sticks")
   
@@ -409,17 +448,11 @@ concept_namer <- function(concept_list) {
            )
     return("Slide")
   
-  # OVS
+  # Flo
   else if (concept[1] %in% c("Comeback", "Corner", "Go/Fly",
                              "Fade", "Fade - Back Shoulder", "Wheel") &
            concept[2] %in% c("Corner", "Wheel", "Comeback"))
-    return("OVS")
-  
-  # Boot
-  else if (concept[1] == "Comeback" &
-           (concept[2] == "Whip" |
-           is_flat(concept[2])))
-    return("Boot")
+    return("Flo")
   
   # Catch Alls
   
@@ -439,8 +472,14 @@ concept_namer <- function(concept_list) {
     return("Slice")
   
   # Cross
-  else if ("Deep Cross" %in% concept)
-    return("Cross")
+  else if ("Deep Cross" %in% concept) {
+    if (concept[1] == "Deep Cross") {
+      other_name <- concept[2]
+    }
+    else {other_name <- concept[1]}
+    name <- paste(other_name,"Cross")
+    return (name)
+  }
   
   # Jerk
   else if ("Jerk" %in% concept)
@@ -463,10 +502,15 @@ concept_namer <- function(concept_list) {
   else if (concept[2] == "Angle")
     return("Angle")
   
-  # Shallow
-  else if (concept[1] %in% c("Drag", "Chip - Drag") |
-           concept[2] %in% c("Drag", "Chip - Drag"))
-    return("Shallow")
+  # Drag
+  else if (contains_route(c("Drag", "Chip - Drag"),concept)) {
+    if (concept[1] %in% c("Drag", "Chip - Drag")) {
+      other_name <- concept[2]
+    }
+    else {other_name <- concept[1]}
+    name <- paste(other_name,"Drag")
+    return (name)
+  }
   
   # Pick Opp
   else if ("Pick" %in% concept)
@@ -524,6 +568,10 @@ name_count <- con2_named %>%
   summarise(n_cum = sum(n)) %>%
   arrange(desc(n_cum))
 
+con2_inspect2 <- con2_named %>%
+  group_by(con_name) %>%
+  mutate(n_cum = sum(n)) %>%
+  arrange(desc(n_cum),con_name)
 
 
 ```
@@ -992,23 +1040,6 @@ pass_data_eval$TargetName <- t_name
 ```{r}
 #Functions to be used in full-field concept namer
 
-contains_route <- function(rte_set,vector) {
-  for (route in rte_set) {
-    if (route %in% vector)
-      return(TRUE)
-  }
-  return(FALSE)  
-}
-
-contains_all_routes <- function(rte_set,vector) {
-  for (route in rte_set) {
-    if (route %in% vector) {}
-    else 
-      return(FALSE)
-  }
-  return(TRUE)
-}
-
 has_flat <- function(vector) {
   for (route in vector) {
     if (is_flat(route))
@@ -1185,6 +1216,15 @@ pde_mesh <- pass_data_eval %>%
 rollouts <- pass_data_eval %>%
   filter(grepl("rollout",DropType,TRUE)) %>%
   select(LeftName,RightName,LeftConcept,RightConcept,FullName)
+
+slot_inspect <- route_data %>%
+  filter(Order_OutsideToInside == 2,
+         OnFieldPosition == "WR") %>%
+  group_by(Route) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n))
+
+
   
 
 ```

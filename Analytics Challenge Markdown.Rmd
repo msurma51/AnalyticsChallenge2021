@@ -1,7 +1,1503 @@
 ---
 title: "SIS Analytics Challenge Markdown"
-author: "Travis Somers"
+author: "Mark Surma"
 date: "6/29/2021"
 output: html_document
 ---
-32 total plays involved less than 5 eligible receivers. These were omitted.
+
+```{r setup, message=FALSE}
+library(tidyverse)
+load(file = "pde.Rdata")
+```
+
+```{r}
+#Functions to be used within route sorting algorithms
+
+#Boolean evaluates whether a route goes to the flat
+is_flat <- function(route) {
+  if (str_detect(route,"Flat"))
+    return(TRUE)
+  else if (str_detect(route,"Swing"))
+    return(TRUE)
+  else {return(FALSE)}
+  }
+
+#Boolean evaluates whether any route from a given set is contained in a
+#route concept
+contains_route <- function(rte_set,concept) {
+  for (route in rte_set) {
+    if (route %in% concept)
+      return(TRUE)
+  }
+  return(FALSE)  
+}
+
+#Boolean evaluates whether every route from a given set is contained in a 
+#route concept
+contains_all_routes <- function(rte_set,concept) {
+  for (route in rte_set) {
+    if (route %in% concept) {}
+    else 
+      return(FALSE)
+  }
+  return(TRUE)
+}
+
+#Boolean evaluates whether a route concept contains a "flat" route
+has_flat <- function(concept) {
+  for (route in concept) {
+    if (is_flat(route))
+      return(TRUE)
+  }
+  return(FALSE)
+}
+
+#Boolean evaluates whether any of a set of routes are contained within one 
+#concept or the other
+contains_route_or <- function(rte_set,concept1,concept2) {
+  for (route in rte_set) {
+    if (route %in% concept1 |
+        route %in% concept2)
+      return(TRUE)
+  }
+  return(FALSE)
+}
+
+#Boolean evaluates whether any of a set of routes are contained within both
+#of two route concepts
+contains_route_and <- function(rte_set,concept1,concept2) {
+  for (route in rte_set) {
+    if (route %in% concept1 &
+        route %in% concept2)
+      return(TRUE)
+  }
+  return(FALSE)
+}
+
+#Boolean checks whether routes on opposite sides contain any of 2 distinct sets of
+#routes (i.e. looking for "Drag" on one side and "Dig" on the other)
+check_opposite <- function(rte_set1,rte_set2,concept1,concept2) {
+  if (contains_route(rte_set1,concept1) &
+      contains_route(rte_set2,concept2))
+    return(TRUE)
+  else if (contains_route(rte_set1,concept2) &
+           contains_route(rte_set2,concept1))
+    return(TRUE)
+  else return(FALSE)
+}
+#Boolean evaluates whether specifically named route concepts are found on opposite
+#sides of one another
+check_opp_name <- function(name_set1,name_set2,l_name,r_name) {
+  if ((l_name %in% name_set1 & r_name %in% name_set2) |
+      (r_name %in% name_set1 & l_name %in% name_set2))
+    return(TRUE)
+  return(FALSE)
+}
+
+#Boolean evaluates whether a specifically named route concept is found on one side
+#while any of a set of routes is found on the other (i.e. "Spot" on one side and 
+# "Drag" on the other to form a "Spot Mesh" full field concept)
+check_opp_mix <- function(rte_set,name_set,concept1,concept2,l_name,r_name) {
+  if ((l_name %in% name_set & contains_route(rte_set,concept2)) |
+      (r_name %in% name_set & contains_route(rte_set,concept1)))
+    return(TRUE)
+  return(FALSE)
+}
+
+#Boolean evaluates whether a numerically referenced on-field position is aligned close to the EMOL
+is_slot <- function(ofp_ref) {
+  if (ofp_ref %in% c("SWR","TE"))
+    return(TRUE)
+  return(FALSE)
+}
+
+#Boolean evaluates whether WRs are bunched, i.e. their on-field positions are all the same
+is_bunch <- function(ofp) {
+  one <- ofp[1]
+  if(all(ofp == one))
+    return(TRUE)
+  return(FALSE)
+}
+
+```
+
+```{r}
+#Naming 2-man route concepts
+
+con_namer_2 <- function(concept,ofp,back) {
+  #First concepts that include the back to the flat
+  
+  #Spacing
+  if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", "Angle", "Over Ball") &
+       concept[2] %in% c("Over Ball", "Pick", "Curl")) &
+      has_flat(back))
+    return("Spacing")
+  
+  #Spacing Whip
+  else if (contains_all_routes(c("Curl","Whip"),concept) &
+           has_flat(back))
+    return("Spacing Whip")
+
+  #Rub - Spacing where #2 route continues
+  else if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", "Drag", "Angle") &
+           concept[2] %in% c("Slant", "Dig", "Drag", "Angle")) &
+           has_flat(back))
+    return("Rub")
+
+  #Pick Lift
+  else if (((concept[1] %in% c("Go/Fly", "Fade", "Post", "Wheel") &
+            ofp[1] == "WR") &
+           concept[2] %in% c("Over Ball", "Pick", "Curl")) &
+           has_flat(back))
+    return("Pick Lift")
+
+  #Spot and Inverted
+  else if ((contains_route(c("Curl", "Pick", "Over Ball", "Dig"),concept) &
+            "Corner" %in% concept) &
+           has_flat(back))
+    return("Spot")
+
+  #Spot Wheel
+  else if ((contains_route(c("Curl", "Pick", "Over Ball"),concept) &
+            "Wheel" %in% concept) &
+           has_flat(back))
+    return("Spot Wheel")
+
+  #Spot Dig
+  else if ((concept[1] %in% c("Curl", "Pick", "Over Ball") &
+           concept[2] == "Dig") &
+           has_flat(back))
+    return("Spot Dig")
+
+  #Spot Drag
+  else if (contains_all_routes(c("Drag","Corner"),concept) &
+           has_flat(back))
+    return("Spot Drag")
+  
+  #Spot Sail
+  else if (contains_all_routes(c("Curl","Out"),concept) &
+           has_flat(back))
+    return("Spot Sail")
+
+  #Sail Drag
+  else if (contains_all_routes(c("Drag","Out"),concept) &
+           has_flat(back))
+    return("Sail Drag")
+
+  #Spot Basic Drag
+  else if (contains_all_routes(c("Drag","Dig"),concept) &
+           has_flat(back))
+    return("Spot Basic Drag")
+    # #2 Curl
+  else if (all(concept == c("Drag", "Curl")) &
+           has_flat(back))
+    return("Spot Basic Drag")
+  
+  #Spot Whip
+  else if (contains_all_routes(c("Corner","Whip"),concept) & 
+           has_flat(back))
+    return("Spot Whip")
+  
+  #Spot Dig Whip
+  else if (contains_all_routes(c("Dig","Whip"),concept) &
+           has_flat(back))
+    return("Spot Dig Whip")
+  
+  #Sail Whip
+  else if (contains_all_routes(c("Out","Whip"),concept) &
+           has_flat(back))
+    return("Sail Whip")
+  
+  #Spot Lift Whip
+  else if ((contains_route(c("Go/Fly","Fade","Post","Seam","Wheel"),concept) &
+            contains_route("Whip",concept)) &
+           has_flat(back))
+    return("Spot Lift Whip")
+  
+
+  #Slot Cross
+  else if ((concept[1] %in% c("Curl", "Dig", "Post") &
+            concept[2] %in% c("Seam", "Deep Cross", "Post")) &
+           has_flat(back))
+    return("Slot Cross")
+    #Stacks
+  else if ((contains_route(c("Curl","Dig","Post"),concept) &
+            contains_route(c("Seam", "Deep Cross"),concept)) &
+           (has_flat(back) &
+            ofp[1] == ofp[2]))
+    return("Slot Cross")
+  
+  #Spot Seam
+  else if ((contains_route(c("Curl","Over Ball", "Pick"),concept) &
+            contains_route(c("Post", "Seam"),concept)) &
+           has_flat(back))
+    return("Spot Seam")
+
+  #Flood
+  else if ((concept[1] %in% c("Go/Fly", "Post", "Fade") & ofp[1] == "WR") &
+            (concept[2] == "Out" &
+           has_flat(back)))
+    return("Flood")
+    #Inverted
+  else if (contains_all_routes(c("Out", "Wheel"),concept) &
+           has_flat(back))
+    return("Flood")
+    #Inverted smash flood (normal smash w/ flat is spot)
+  else if (contains_all_routes(c("Corner","Out"),concept) &
+           has_flat(back))
+    return("Flood")
+  
+  #Sail Lift (Flood w/ minus split in either order)
+  else if ((contains_route("Out",concept) &
+           contains_route(c("Go/Fly", "Fade", "Post", "Seam"), concept)) &
+           has_flat(back))
+    return("Sail Lift")
+           
+  #Now routes where there is no back release to that side and/or it is not
+  #relevant to the concept
+
+  # Boot
+  else if (concept[1] == "Comeback" &
+           (concept[2] == "Whip" |
+           is_flat(concept[2])))
+    return("Boot")
+    # Smash
+  else if (contains_all_routes(c("Corner", "Chip - Flat"),concept))
+    return ("Boot Smash")
+    # Sail
+  else if (contains_all_routes(c("Out", "Chip - Flat"),concept))
+    return ("Boot Sail")
+  else if (concept[1] %in% c("Post", "Fade", "Go/Fly") &
+           concept[2] == "Chip - Flat")
+    return ("Boot Lift")
+    # Back-side 
+  else if (contains_all_routes(c("Drag","Deep Cross"),concept))
+    return ("Back-Side Boot") 
+  
+  # Sail (Out/Chip-Flat already caught by Boot)
+  else if (concept[1] == "Out" &
+           is_flat(concept[2])
+          )
+    return("Sail")
+  else if (concept[1] == "Whip" &
+           concept[2] == "Out")
+    return("Sail")
+    #Inverted
+  else if ((concept[1] == "Out" &
+            is_slot(ofp[1])) &
+           concept[2] == "Whip")
+    return("Sail")
+
+    # Smash - Traditional
+  else if ((concept[1] %in% c("Curl", "Dig") &
+            ofp[1] == "WR") &
+           concept[2] == "Corner")
+    return("Smash")
+  # Smash variations w/ inverted
+  else if ("Corner" %in% concept &
+           contains_route(c("Out","Whip","Flat - Right", "Flat - Left",
+                             "Swing - Right", "Swing - Left"),concept))
+    return("Smash")
+  
+  # Smash Fade 
+  else if ((concept[1] %in% c("Curl", "Out", "Whip") |
+                            is_flat(concept[1])) &
+           concept[2] == "Fade")
+    return("Smash Fade")
+  # Smash Fade - inverted 
+  else if ((concept[1] == "Fade" &
+            is_slot(ofp[1])) &
+           (concept[2] %in% c("Out", "Whip", "Curl") |
+            is_flat(concept[2])))
+    return("Smash Fade")
+  
+    
+  # Option - Isolation on #1 and/or #2, attacking flat to fade hole
+  # "Opt" Prefix allows concepts to stand alone or be grouped easily
+  
+  #Hitches 
+  else if (concept[1] %in% c("Curl", "Whip") &
+           concept[2] == "Curl")
+    return("Opt Hitches")
+  
+  #Ohio - 2 man Stick (Some minus split caught by Smash Fade)
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Wheel") &
+           concept[2] == "Out")
+    return("Opt Ohio")
+  else if ((concept[2] %in% c("Go/Fly","Wheel") &
+           concept[1] == "Out") &
+           ofp[1] == ofp[2])
+    return("Opt Ohio")
+  
+  #Ohio Hitch - Hitches w/ conversion OR Ohio w/ Hitch (See note above)
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Wheel") &
+           concept[2] == "Curl")
+    return("Opt Ohio Hitch")
+    #Inverted w/ stack
+  else if ((concept[2] == "Go/Fly" &
+           concept[1] == "Curl") &
+           ofp[1] == ofp[2])
+    return("Opt Ohio Hitch")
+  
+  #Ohio Whip - Ohio w/ Whip (See note above), includes "Out" from wide split
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Out", "Wheel") &
+           concept[2] == "Whip")
+    return("Opt Ohio Whip")
+      #Inverted w/ stack
+  else if ((concept[2] %in% c("Go/Fly","Wheel") &
+           concept[1] == "Whip") &
+           ofp[1] == ofp[2])
+    return("Opt Ohio Whip")
+  
+  #Speed
+  else if (concept[1] == "Out" &
+           concept[2] %in% c("Out", "Curl"))
+    return("Opt Speed")
+  
+  #Stretch
+  else if (is_flat(concept[1]) &
+           concept[2] %in% c("Curl", "Whip", "Out"))
+    return("Opt Stretch")
+    #Inverted w/ minus split, doesn't include Sail or Sit-Flat
+  else if ((is_flat(concept[2]) | concept[2] == "Wheel") &
+           (concept[1] == "Whip" & is_slot(ofp[1])))
+    return("Opt Stretch")
+  
+  # Pick
+  else if (concept[1] == "Pick" &
+           (concept[2] == "Out" |
+            is_flat(concept[2])
+            ))
+    return("Pick - Flat")
+    # Sit - Flat
+  else if ((is_flat(concept[2]) | concept[2] == "Wheel") &
+           (concept[1] == "Curl" & is_slot(ofp[1])))
+    return("Pick - Flat")
+  
+  # Slant - Slide
+  else if (concept[1] == "Slant" &
+           (is_flat(concept[2]) | concept[2] == "Out"))
+    return("Slant - Slide")
+  
+  # Curl - Out (Can't be sure of which is deeper route)
+  else if (concept[1] == "Curl" & concept[2] == "Out")
+    return("Curl - Out")
+  
+  # Dig - Out (Can't be sure of which is deeper route)
+  else if (concept[1] == "Dig" & concept[2] == "Out")
+    return("Dig - Out")
+  
+  # Pivot 
+  else if (concept[1] %in% c("Dig", "Curl", "Slant") &
+           concept[2] == "Whip")
+    return("Pivot")
+    #Dig-Curl
+  else if (concept[1] == "Dig" & concept[2] == "Curl")
+    return("Pivot")
+    #Inverted w/ stacks
+  else if (("Dig" %in% concept &
+            contains_route(c("Out", "Whip", "Curl"),concept))
+            & ofp[1] == ofp[2])
+    return("Pivot")
+
+  # Slide (Catches all not caught in Smash Fade w/ minus split)
+  else if ((concept[1] %in% c("Go/Fly", "Fade", "Post") &
+            ofp[1] == "WR") &
+           is_flat(concept[2]))
+    return("Slide")
+  
+  # Grab
+  else if (concept[1] %in% c("Post","Seam") &
+           concept[2] %in% c("Whip","Curl"))
+    return("Grab")
+  
+  # Hash - Traditional
+  else if (concept[1] %in% c("Curl","Quick","Out")  &
+           concept[2] %in% c("Seam", "Go/Fly", "Post"))
+    return("Hash")
+    # Hash variations
+  else if (contains_route(c("Post", "Seam", "Go/Fly"),concept) &
+           contains_route(c("Whip","Flat - Right", "Flat - Left",
+                             "Swing - Right", "Swing - Left"),concept))
+    return("Hash")
+  
+  # Lift - Dig
+  else if (concept[1] == "Dig" &
+           concept[2] %in% c("Seam", "Go/Fly", "Post", "Fade"))
+    return("Lift - Dig")
+  
+  
+  # Double Slant 
+  else if (concept[1] %in% c("Slant", "Angle") &
+           concept[2] %in% c("Slant", "Angle"))
+    return("Double Slant")
+  
+  # Spacer = Spacing w/ no back (pot opp side)
+  else if (concept[1] %in% c("Curl", "Dig", "Pick", "Slant", "Angle", 
+                             "Over Ball") &
+           concept[2] %in% c("Curl", "Over Ball", "Pick"))
+    return("Spacer")
+  
+  # Levels
+  else if (concept[1] %in% c("Dig", "Slant", "Angle", "Curl", "Out", "Whip") &
+           concept[2] == "Dig")
+    return("Levels")
+  
+  # Curl - Flat
+  else if (concept[1] %in% c("Curl", "Dig") &
+           is_flat(concept[2]))
+    return("Curl - Flat")
+  
+
+  # Switch Wheel
+  else if (concept[1] %in% c("Slant", "Curl", "Dig", "Pick") &
+           concept[2] == "Wheel")
+    return("Switch Wheel")
+  
+  # Switch
+  else if (concept[1] %in% c("Slant", "Dig", "Angle") &
+           concept[2] == "Comeback")
+    return("Switch")
+
+  # Sit - Corner (Spot w/ no flat route; catches traditional smash w/ cut split)
+  else if (contains_route(c("Over Ball", "Curl", "Pick"),concept) &
+           "Corner" %in% concept)
+    return("Sit - Corner")
+  
+  # Drive
+  else if (concept[1] %in% c("Drag","Over Ball") &
+           concept[2] %in% c("Dig", "Curl", "Over Ball")
+           )
+    return("Drive")
+    #Stacks
+  else if ((contains_route(c("Dig","Curl", "Over Ball"), concept) &
+           "Drag" %in% concept) &
+           ofp[1] == ofp[2])
+    return("Drive")
+  
+  # Verts
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Wheel", "Comeback") &
+           concept[2] %in% c("Go/Fly", "Seam", "Post", "Fade"))
+    return("Verts")
+    #Wide corner route
+  else if ((concept[1] == "Corner" & ofp[1] == "WR") &
+           concept[2] %in% c("Go/Fly", "Seam", "Post", "Fade"))
+    return("Verts")
+  
+  # Vert Dig
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Wheel", "Comeback") &
+           concept[2] == "Dig")
+    return("Vert Dig")
+    #Wide corner route
+  else if ((concept[1] == "Corner" & ofp[1] == "WR") &
+           concept[2] == "Dig")
+    return("Vert Dig")
+    
+  
+  # Vert Switch
+  else if (concept[1] %in% c("Post", "Seam", "Go/Fly", "Fade") &
+           concept[2] %in% c("Wheel", "Fade")
+          )
+    return("Vert Switch")
+  
+  # Back to Verts for stacks
+  else if (concept[1] %in% c("Post", "Seam", "Corner") &
+           concept[2] == "Go/Fly")
+    return("Verts")
+  
+  # Scissors  - traditional
+  else if (concept[1] %in% c("Post", "Go/Fly", "Seam") &
+           concept[2] %in% c("Corner", "Out"))
+    return("Scissors")
+    #Cut split or stack divides
+  else if (contains_route("Corner",concept) &
+           contains_route(c("Dig", "Post", "Seam"),concept) &
+           (ofp[1] == ofp[2] | is_slot(ofp[1])))
+    return("Scissors")
+  
+  # Dbl Post
+  else if ((concept[1] %in% c("Post", "Seam") &
+            concept[2] %in% c("Post", "Seam")) &
+           "Post" %in% concept)
+    return("Double Post")
+  
+  # Choice
+  else if (concept[1] %in% c("Post", "Seam") &
+           concept[2] %in% c("Dig", "Curl"))
+    return("Choice")
+  
+  # Double Seam
+  else if (concept[1] == "Seam" &
+           concept[2]== "Seam")
+    return("Double Seam")
+  
+  # Sticks
+  else if (concept[1] %in% c("Curl", "Comeback", "Out",
+                             "Go/Fly", "Fade") &
+           concept[2] %in% c("Curl", "Comeback", "Out"))
+    return("Sticks")
+  
+  # Trail (not already in vert switch or scissors)
+  else if (concept[2] %in% c("Corner", "Fade", "Wheel", "Go/Fly") &
+           concept[1] %in% c("Post", "Seam", "Deep Cross")
+           )
+    return("Trail")
+  
+  # Clear
+  else if (concept[1] %in% c("Slant", "Angle") &
+           concept[2] %in% c("Corner", "Go/Fly", "Fade", "Seam",
+                            "Post")
+           )
+    return("Clear")
+  
+  # Flo
+  else if (concept[1] %in% c("Comeback", "Corner", "Go/Fly",
+                             "Fade", "Wheel", "Out") &
+           concept[2] %in% c("Corner", "Wheel", "Comeback"))
+    return("Flo")
+  
+  # Catch Alls
+  
+  # Double Moves
+  else if (concept[1] %in% c("Corner Post", "Post Corner", "Hitch & Go", 
+                             "Out & Up", "Sluggo", "Stick - Nod")
+          )
+    return(concept[1])
+  else if (concept[2] %in% c("Corner Post", "Post Corner", "Hitch & Go", 
+                             "Out & Up", "Sluggo", "Stick - Nod")
+          )
+    return(concept[2])
+  
+  # Naked Slice
+  else if (contains_route("Beneath",concept))
+    return("Slice")
+  
+  # Cross
+  else if ("Deep Cross" %in% concept) {
+    if (concept[1] == "Deep Cross") {
+      other_name <- concept[2]
+    }
+    else {other_name <- concept[1]}
+    name <- paste(other_name,"Cross")
+    return (name)
+  }
+  
+  # Drag
+  else if (contains_route(c("Drag"),concept)) {
+    if (concept[1] == "Drag") {
+      other_name <- concept[2]
+    }
+    else {other_name <- concept[1]}
+    name <- paste(other_name,"Drag")
+    return (name)
+  }
+  
+  # Jerk
+  else if ("Jerk" %in% concept)
+    return("Jerk")
+  
+  # Single routes
+  else if (concept[1] %in% c("NULL","Run Fake", "Chip"))
+    return(concept[2])
+  else if (concept[2] %in% c("Run Fake", "Check & Release", "Chip"))
+    return(concept[1])
+  
+  # Hammer
+  else if (concept[1] %in% c("Dig","Curl","Out", "Whip") &
+           concept[2] == "Slant")
+    return("Hammer")
+  
+  # (Route) Slant
+  else if (concept[2] == "Slant") 
+    return(paste(concept[1],"Slant"))
+
+  # Pick Opp
+  else if ("Pick" %in% concept)
+    return("Pick Opp")
+  
+  # Leak
+  else if ("Leak" %in% concept)
+    return("Leak")
+  
+  # Ball
+  else if ("Over Ball" %in% concept)
+    return("Ball")
+  
+  # Stretch (Flat), not option 
+  else if (is_flat(concept[1]) |
+           is_flat(concept[2]))
+    return("Stretch")
+  
+  # (Route) Sit - Hold #2 to w/ Curl to Iso #1
+  else if (concept[2] == "Curl")
+    return(paste(concept[1],"Sit"))
+  
+  #Whip
+  else if (concept[1] == "Whip")
+    return("Whip")
+  
+  # Angle
+  else if (concept[2] == "Angle")
+    return("Angle")
+
+  # Screens
+  else if (contains_route("Screen",concept))
+    return("Screen")
+  
+  # Single route
+  else if (contains_route(c("Quick", "Check & Release"),concept)) {
+    if (concept[1] %in% c("Quick", "Check & Release"))
+      return(concept[2])
+    return(concept[1])
+  }
+  
+  # No Assignment
+  else {return("Unnamed")}
+}
+
+```
+
+
+
+```{r}
+#Naming 3-man route concepts
+
+con_namer_3 <- function(concept,ofp,back) {
+  
+  # Start with concepts involving Drag routes.
+  # The first involve concepts where the Drag is potentially an active
+  # element on that side of the field
+  
+  # Clear
+  if (concept[1] %in% c("Slant", "Angle", "Drag") &
+           (concept[2] %in% c("Corner", "Go/Fly", "Fade", "Seam", "Post") &
+          concept[3] %in% c("Seam", "Post", "Deep Cross", "Go/Fly"))
+           )
+    return("Clear")
+  
+  # Rub - Spacing where #2 route continues
+  else if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", "Drag", "Angle") &
+           concept[2] %in% c("Slant", "Dig", "Drag", "Angle")) &
+           is_flat(concept[3])
+           )
+    return("Rub")
+    # Invert #2 and #3 w/ minus split
+  else if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", "Drag", "Angle") &   
+            is_slot(ofp[1])) &
+           (concept[3] %in% c("Slant", "Dig", "Drag", "Angle") &
+           is_flat(concept[2]))
+           )
+    return("Rub")
+  
+  # Spot Drag - normal
+  else if (all(concept[1:2] == c("Drag", "Corner")) &
+            is_flat(concept[3])
+          )
+    return("Spot Drag")
+    # Minus split, Corner and Flat Stacked
+  else if ((is_slot(ofp[1]) & ofp[2] == ofp[3]) &
+           (all(concept[c(1,3)] == c("Drag", "Corner")) &
+            is_flat(concept[2]))
+          )
+    return("Spot Drag")
+    #Minus split, Corner widest stacked w/ Drag
+  else if ((all(concept[1:2] == c("Corner", "Drag")) & is_slot(ofp[1])) &
+           (ofp[1] == ofp[2] & is_flat(concept[3]))
+          )
+    return("Spot Drag")
+    # Bunches
+  else if ((contains_all_routes(c("Corner", "Drag"),concept) &
+            is_bunch(ofp)) &
+            has_flat(concept)
+           )
+    return("Spot Drag")
+  
+  # Sail Drag - normal
+  else if (all(concept[1:2] == c("Drag","Out")) &
+            is_flat(concept[3])
+          )
+    return("Sail Drag")
+    # Minus split, Out and Flat Stacked
+  else if ((is_slot(ofp[1]) & ofp[2] == ofp[3]) &
+           (all(concept[c(1,3)] == c("Drag", "Out")) & is_flat(concept[2]))
+          )
+    return("Sail Drag")
+    #Minus split, Out widest stacked w/ Drag
+  else if ((all(concept[1:2] == c("Out", "Drag")) & is_slot(ofp[1])) &
+           (ofp[1] == ofp[2] & is_flat(concept[3]))
+          )
+    return("Sail Drag")
+    # Bunches
+  else if ((contains_all_routes(c("Out", "Drag"),concept) &
+            is_bunch(ofp)) &
+            has_flat(concept)
+           )
+    return("Sail Drag")
+  
+  # Spot Basic Drag
+  else if (concept[1] == "Drag" &
+           (concept[2] %in% c("Dig", "Curl") &
+            is_flat(concept[3]))
+          )
+    return("Spot Basic Drag")
+    # #2 and #3 inverted w/ minus split and tight stack
+  else if ((concept[1] == "Drag" & is_slot(ofp[1])) &
+           ((concept[3] %in% c("Dig", "Curl") & is_flat(concept[2])) & 
+            all(ofp[2:3] == c("TE","TE")))
+          )
+    return("Spot Basic Drag")
+    # Bunches
+  else if ((contains_route("Drag",concept) &
+            contains_route(c("Dig","Curl"),concept)) & 
+            (has_flat(concept) & is_bunch(ofp))
+          )
+    return("Spot Basic Drag")
+  
+  # Monsoon (MVS w/ cut split)
+  else if ((contains_all_routes(c("Drag","Dig"),concept) & is_slot(ofp[1])) &
+            concept[3] %in% c("Post", "Go/Fly", "Seam")
+          )
+    return("Monsoon")
+    # Invert #2 and #3 w/ stack
+  else if ((contains_all_routes(c("Drag","Dig"),concept) & is_slot(ofp[1])) &
+            (concept[2] %in% c("Post", "Go/Fly", "Seam") 
+             & ofp[2] == ofp[3])
+          )
+    return("Monsoon")
+    # #1 Post or Seam
+  else if ((concept[1] %in% c("Post", "Seam")) &
+           contains_all_routes(c("Dig", "Drag"),concept[2:3]) &
+           is_slot(ofp[1])
+           )
+    return("Monsoon")
+    # Bunches
+    else if ((contains_all_routes(c("Drag","Dig"),concept) &
+            contains_route(c("Post", "Go/Fly", "Seam"),concept)) &
+            (is_slot(ofp[1]) & is_bunch(ofp))
+          )
+    return("Monsoon")
+  
+  
+
+  # Cruise
+  else if (concept[2] %in% c("Drag","Over Ball") &
+           concept[3] %in% c("Dig", "Curl", "Over Ball")
+           )
+    return("Cruise")
+    # Invert #2 and #3 w/  tight stack
+  else if ((concept[2] %in% c("Dig","Curl", "Over Ball") & 
+            concept[3]== "Drag") & 
+           all(ofp[2:3] == c("TE","TE"))
+          )
+    return("Cruise")
+    # Minus split #1 Drag
+  else if ((concept[1] == "Drag" & is_slot(ofp[1])) &
+           contains_route(c("Dig", "Curl", "Over Ball"),concept)
+           )
+    return("Cruise")
+    # Tight Bunches
+  else if (("Drag" %in% concept &
+            contains_route(c("Dig", "Curl", "Over Ball"),concept)) &
+           all(ofp == "TE")
+          )
+    return("Cruise")
+  
+  # Steer
+  else if (contains_all_routes(c("Over Ball", "Deep Cross"),concept[2:3]) &
+           is_slot(ofp[2])
+          )
+    return("Steer")
+    # Minus split
+  else if (contains_all_routes(c("Over Ball", "Deep Cross"),concept) &
+           is_slot(ofp[1])
+          )
+    return("Steer")
+  
+  # Back-Side Boot
+  else if (contains_all_routes(c("Drag", "Deep Cross"),concept[2:3]) &
+           is_slot(ofp[2])
+          )
+    return("Back-Side Boot")
+    # Minus split
+  else if (contains_all_routes(c("Drag", "Deep Cross"),concept) &
+           is_slot(ofp[1])
+          )
+    return("Back-Side Boot")
+  
+  # Next remove "Drag" from certain concepts and send the remainder
+  # to the 2-man concept namer
+  
+
+  # #3 Drag w/ back to flat
+  else if ((concept[3] == "Drag" & is_slot(ofp[3])) &
+      has_flat(back)) {
+    name <- con_namer_2(concept[1:2], ofp[1:2], back)
+    return(paste(name, "Drag"))
+  }
+  # #2 or #3 Drag out of slot or tight bunch
+  else if (contains_route("Drag",concept[2:3]) & is_bunch(ofp)) {
+    i <- max(which(concept == "Drag"))
+    name <- con_namer_2(concept[-i],ofp[-i],back)
+    return(paste(name, "Drag"))
+  }
+  # #1 Drag out of slot or tight bunch w/ back to flat
+  else if ((concept[1] == "Drag" & is_bunch(ofp)) &
+      has_flat(back)) {
+    name <- con_namer_2(concept[2:3], ofp[2:3], back)
+    return(paste(name, "Drag"))
+  }
+  
+  # Now concepts determined by all 3 routes
+  
+  # Seam Choice
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Wheel", "Comeback") &
+      (concept[2] %in% c("Seam", "Post") &
+       concept[3] %in% c("Dig", "Curl"))
+     )
+    return("Seam Choice")
+    #Invert #1 and #2 w/ minus split
+  else if ((concept[2] %in% c("Wheel", "Fade") & is_slot(ofp[1])) &
+      (concept[1] %in% c("Seam", "Post") &
+       concept[3] %in% c("Dig", "Curl"))
+     )
+    return("Seam Choice")
+  
+  # Seam Verts
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Comeback") &
+      (concept[2] %in% c("Go/Fly", "Seam", "Post", "Fade") &
+       concept[3] %in% c("Seam", "Post", "Deep Cross", "Dig"))
+     )
+    return("Seam Verts")
+  
+  # Seam Switch
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Comeback", "Wheel") &
+      (concept[3] == "Wheel" &
+       concept[2] %in% c("Seam", "Post", "Deep Cross", "Dig"))
+           )
+    return("Seam Switch")
+  
+  # Verts Wheel
+  else if (concept[1] %in% c("Post", "Deep Cross", "Seam") &
+      (concept[3] == "Wheel" &
+       concept[2] %in% c("Seam","Go/Fly", "Post", "Deep Cross"))
+           )
+    return("Seam Wheel")
+  
+  #Pinwheel
+  else if (concept[1] %in% c("Post", "Deep Cross", "Seam") &
+      (concept[3] == "Wheel" &
+       concept[2] %in% c("Curl", "Dig", "Over Ball", "Pick"))
+           )
+    return("Pinwheel")
+    #Invert #2 and #3 w/ minus split
+  else if ((concept[1] %in% c("Post", "Deep Cross", "Seam") &
+            is_slot(ofp[1])) &
+      (concept[2] == "Wheel" &
+       concept[3] %in% c("Curl", "Dig", "Over Ball", "Pick"))
+           )
+    return("Pinwheel")
+    #Invert #2 and #3 w/ inside stack
+  else if ((concept[1] %in% c("Post", "Deep Cross", "Seam") &
+            ofp[2] == ofp[3]) &
+      (concept[2] == "Wheel" &
+       concept[3] %in% c("Curl", "Dig", "Over Ball", "Pick"))
+           )
+    return("Pinwheel")
+  
+  # Verts Snap (#2 breaks off)
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Comeback") &
+      (concept[2] %in% c("Out", "Whip", "Curl") &
+       concept[3] %in% c("Seam", "Post", "Deep Cross"))
+           )
+    return("Verts Snap")
+    # (#3 breaks off)
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Comeback") &
+      (concept[3] %in% c("Out", "Whip", "Curl") &
+       concept[2] %in% c("Seam", "Post", "Go/Fly", "Fade"))
+           )
+    return("Verts Snap")
+  
+  #Caddy
+  else if (concept[2] %in% c("Slant", "Angle") &
+           concept[3] %in% c("Corner", "Go/Fly", "Fade", "Seam", "Post"))
+    return("Caddy")
+    # Inverted w/ stack
+  else if ((concept[3] %in% c("Slant", "Angle") &
+           concept[2] %in% c("Corner", "Go/Fly", "Fade", "Seam", "Post")) &
+           ofp[2] == ofp[3])
+    return("Caddy")
+  
+  # Stick
+  else if ((concept[1] %in% c("Go/Fly", "Fade", "Wheel") & ofp[1] == "WR") &
+          ((concept[2] == "Out" | is_flat(concept[2])) &
+            concept[3] %in% c("Out", "Curl"))
+          )
+    return("Stick")
+    #Inverted w/ tight stack
+  else if ((concept[1] %in% c("Go/Fly", "Fade", "Wheel") & 
+            all(ofp == c("WR","TE","TE"))) &
+          (is_flat(concept[3]) &
+            concept[2] %in% c("Out", "Curl"))
+          )
+    return("Stick")
+  
+    # Seam Dig Lift
+  else if (concept[1] %in% c("Go/Fly", "Fade", "Comeback") &
+            (concept[2] == "Dig" &
+             concept[3] %in% c("Seam", "Post", "Go/Fly", "Fade"))
+          )
+    return("Seam Dig - Lift")
+    # Minus split
+  else if ((concept[1] == "Dig" & is_slot(ofp[1])) &
+           contains_route(c("Seam", "Post", "Go/Fly", "Fade"),concept[2:3])
+          )
+    return("Seam Dig - Lift")
+  
+  # Hitches
+  else if (concept[1] %in% c("Curl", "Quick") &
+          (concept[2] %in% c("Curl", "Over Ball") &
+           concept[3] %in% c("Curl", "Over Ball" ))
+          )
+    return ("Hitches")
+  
+    # Spacing
+  else if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", 
+                              "Angle", "Over Ball") &
+       concept[2] %in% c("Over Ball", "Pick", "Curl")) &
+            is_flat(concept[3])
+           )
+    return("Spacing")
+    # Invert #2 and #3 w/ minus split
+  else if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", 
+                              "Angle", "Over Ball") &
+            is_slot(ofp[1])) &
+       (concept[3] %in% c("Over Ball", "Pick", "Curl") &
+            is_flat(concept[2]))
+           )
+    return("Spacing")
+  
+  # Spacing Whip (#1 Whip)
+  else if ((concept[1] == "Whip" &
+       concept[2] %in% c("Over Ball", "Pick", "Curl")) &
+            is_flat(concept[3])
+           )
+    return("Spacing Whip")
+    # #2 Whip
+  else if ((concept[1] %in% c("Curl", "Pick") &
+       concept[2] == "Whip") &
+            is_flat(concept[3])
+           )
+    return("Spacing Whip")
+   
+  # Pick Lift
+  else if ((concept[1] %in% c("Go/Fly", "Fade", "Post", "Wheel") &
+           concept[2] %in% c("Over Ball", "Pick", "Curl")) &
+           is_flat(concept[3]))
+    return("Pick Lift")
+  
+  # Spot - normal
+  else if (concept[1] %in% c("Curl", "Pick", "Over Ball", "Dig") &
+           (concept[2] == "Corner" &
+            is_flat(concept[3]))
+          )
+    return("Spot")
+    # Inverted
+  else if (concept[1] == "Corner" &
+           (concept[2] %in% c("Curl", "Pick", "Over Ball") &
+            is_flat(concept[3]))
+           )
+    return("Spot")
+    # Minus split
+  else if (("Corner" %in% concept & is_slot(ofp[1])) &
+           (contains_route(c("Curl", "Pick", "Over Ball"),concept) &
+            has_flat(concept[2:3]))
+            )
+    return("Spot")
+    # Bunches
+  else if (("Corner" %in% concept & is_bunch(ofp)) &
+           (contains_route(c("Curl", "Pick", "Over Ball"),concept) &
+            has_flat(concept))
+          )
+    return("Spot")
+  
+  #Spot Wheel
+  else if(concept[1] %in% c("Curl", "Pick", "Over Ball") &
+          concept[2] == "Wheel" &
+          is_flat(concept[3])
+          )
+    return("Spot Wheel")
+    # Bunches
+  else if ((contains_route(c("Curl", "Pick", "Over Ball"),concept) &
+            "Wheel" %in% concept) &
+           (has_flat(concept) & is_bunch(ofp))
+          )
+    return("Spot Wheel")
+  
+  # Spot Basic
+  else if (concept[1] %in% c("Pick", "Over Ball") &
+           (concept[2] %in% c("Dig", "Curl") &
+            is_flat(concept[3]))
+          )
+    return("Spot Basic")
+   # #2 and #3 inverted w/ minus split and tight stack
+  else if ((concept[1] %in% c("Pick", "Over Ball") & is_slot(ofp[1])) &
+           ((concept[3] %in% c("Dig", "Curl") & is_flat(concept[2])) & 
+            all(ofp[2:3] == c("TE","TE")))
+          )
+    return("Spot Basic")
+    # Curl - Dig - Flat
+  else if(all(concept[1:2] == c("Curl", "Dig")) &
+          is_flat(concept[3]))
+    return("Spot Basic")
+    # #2 and #3 inverted w/ minus split and tight stack
+  else if((all(concept[c(1,3)] == c("Curl", "Dig")) & is_slot(ofp[1])) &
+          (is_flat(concept[2]) & all(ofp[2:3] == c("TE","TE")))
+         )
+    return("Spot Basic")
+  
+  # Spot Sail
+  else if ((contains_route(c("Curl","Pick", "Over Ball"),concept[1:2]) &
+            "Out" %in% concept[1:2]) &
+           is_flat(concept[3])
+           )
+    return("Spot Sail")
+    # Invert #2 and #3 w/ stack
+  else if ((contains_route(c("Curl","Pick", "Over Ball"),concept[c(1,3)]) &
+            "Out" %in% concept[c(1,3)]) &
+           (is_flat(concept[2]) & ofp[2] == ofp[3])
+           )
+    return("Spot Sail")
+    # Bunches
+  else if ((contains_route(c("Curl","Pick", "Over Ball"),concept) &
+            "Out" %in% concept) &
+           (has_flat(concept) & is_bunch(ofp))
+          )
+    return("Spot Sail")
+  
+  # Spot Whip
+  else if (contains_all_routes(c("Corner","Whip"),concept[1:2]) & 
+           is_flat(concept[3])
+           )
+    return("Spot Whip")
+    # Invert #2 and #3 w/ inside stack
+  else if (contains_all_routes(c("Corner","Whip"),concept[1:3]) & 
+           (is_flat(concept[2]) & ofp[2] == ofp[3])
+           )
+    return("Spot Whip")
+    # Bunches
+  else if (contains_all_routes(c("Corner","Whip"),concept) & 
+           (has_flat(concept[3]) & is_bunch(ofp))
+           )
+    return("Spot Whip")
+  
+  
+  # Spot Dig Whip
+  else if (contains_all_routes(c("Dig","Whip"),concept[1:2]) & 
+           is_flat(concept[3])
+           )
+    return("Spot Whip")
+    # Invert #2 and #3 w/ inside stack
+  else if (contains_all_routes(c("Dig","Whip"),concept[1:3]) & 
+           (is_flat(concept[2]) & ofp[2] == ofp[3])
+           )
+    return("Spot Whip")
+    # Bunches
+  else if (contains_all_routes(c("Dig","Whip"),concept) & 
+           (has_flat(concept[3]) & is_bunch(ofp))
+           )
+    return("Spot Whip")
+  
+  #Sail Whip
+  else if (contains_all_routes(c("Out","Whip"),concept[1:2]) & 
+           is_flat(concept[3])
+           )
+    return("Spot Whip")
+    # Invert #2 and #3 w/ inside stack
+  else if (contains_all_routes(c("Out","Whip"),concept[1:3]) & 
+           (is_flat(concept[2]) & ofp[2] == ofp[3])
+           )
+    return("Spot Whip")
+    # Bunches
+  else if (contains_all_routes(c("Out","Whip"),concept) & 
+           (has_flat(concept[3]) & is_bunch(ofp))
+           )
+    return("Spot Whip")
+  
+  #Spot Lift Whip
+  else if ((concept[1] %in% c("Go/Fly","Fade","Post","Seam","Wheel") &
+            concept[2] == "Whip") &
+           is_flat(concept[3])
+           )
+    return("Spot Lift Whip")
+    # Invert Flat and Whip with inside stack
+  else if ((concept[1] %in% c("Go/Fly","Fade","Post","Seam","Wheel") &
+            concept[3] == "Whip") &
+           (is_flat(concept[2]) & ofp[2] == ofp[3])
+           )
+    return("Spot Lift Whip")
+    # Invert Lift and Whip with minus split or outside stack
+  else if ((concept[2] %in% c("Go/Fly","Fade","Post","Seam","Wheel") &
+            concept[1] == "Whip") &
+           (is_flat(concept[3]) & 
+            (is_slot(ofp[1]) | ofp[1] == ofp[2]))
+           )
+    return("Spot Lift Whip")
+    # Whip - Flat - Lift w/ minus split and inside stack
+  else if ((concept[3] %in% c("Go/Fly","Fade","Post","Seam","Wheel") &
+            concept[1] == "Whip") &
+           (is_flat(concept[2]) & all(ofp == c("SWR","TE","TE")))
+           )
+    return("Spot Lift Whip")  
+    # Bunches
+  else if ((contains_route(c("Go/Fly","Fade","Post","Seam","Wheel"),concept) &
+            "Whip" %in% concept) &
+           (has_flat(concept) & is_bunch(ofp))
+           )
+    return("Spot Lift Whip") 
+  
+  
+  # Flood
+  else if ((concept[1] %in% c("Go/Fly", "Fade", "Post") &
+           concept[2] == "Out" ) &
+            (all(ofp[1:2] == c("WR","SWR")) & is_flat(concept[3]))
+           )
+    return("Flood")
+    # Minus split
+  else if ((concept[1] %in% c("Go/Fly", "Fade", "Post") & is_slot(ofp[1])) &
+           (concept[2] == "Out"  &
+            is_flat(concept[3]))
+           )
+    return("Flood")
+    # Curl flood (Catches many split scenarios not caught by Spot)
+  else if (concept[1] %in% c("Curl","Dig","Comeback") &
+           (is_flat(concept[2]) &
+            concept[3] == "Corner")
+           )
+    return("Flood")
+  
+
+  
+  # Swivel (Slot/inside pivot)
+  else if ((concept[1] %in% c("Post", "Go/Fly", "Seam", "Wheel") &
+            concept[2] %in% c("Dig", "Curl", "Slant")) & 
+           concept[3] == "Whip"
+          )
+    return("Swivel")
+    # w/ inside Wheel
+  else if (concept[1] %in% c("Dig", "Curl", "Slant") & 
+           contains_all_routes(c("Wheel", "Whip"),concept)
+          )
+    return("Swivel")
+    # Dig - Curl inside
+  else if (concept[1] %in% c("Post", "Go/Fly", "Seam", "Wheel") &
+           all(concept[2:3] == c("Dig", "Curl"))
+          )
+    return("Swivel")
+    # w/ inside Wheel
+  else if (concept[1] == "Dig" & 
+           contains_all_routes(c("Wheel", "Curl"),concept)
+          )
+    return("Swivel")
+    # Tight bunch
+  else if ((contains_route(c("Dig", "Curl", "Slant"),concept) & 
+           "Whip" %in% concept) &
+          all(ofp == c("TE","TE","TE"))
+          )
+    return("Swivel")
+  else if (contains_all_routes(c("Dig", "Curl"),concept) &
+          all(ofp == c("TE","TE","TE"))
+          )
+    return("Swivel")
+  
+
+  # Slot Cross
+  else if ((concept[1] %in% c("Curl", "Dig", "Post") &
+           concept[2] %in% c("Deep Cross", "Seam", "Post")) &
+           is_flat(concept[3])
+           )
+    return("Slot Cross")
+    # Minus split
+  else if ((concept[1] %in% c("Deep Cross", "Seam", "Post") 
+            & is_slot(ofp[1])) &
+           has_flat(concept[2:3])
+           )
+    return("Slot Cross")
+  
+  # Levels Corner - 2 Returns
+  else if ((concept[1] %in% c("Dig", "Curl", "Slant") &
+            concept[2] %in% c("Dig", "Slant")) &
+           concept[3] == "Corner"
+           ) 
+      return("Levels Corner")
+    # #1 and #2 out-break
+  else if (concept[1] %in% c("Out","Whip") &
+           (contains_route(c("Out", "Whip"),concept[2:3]) &
+            "Corner" %in% concept[2:3])
+           ) 
+      return("Levels Out")
+  
+  else if ((concept[1] %in% c("Dig", "Curl", "Slant") &
+            concept[2] %in% c("Dig", "Slant")) &
+           concept[3] %in% c("Dig", "Curl")
+           ) 
+      return("Levels Basic")
+  
+  else if ((concept[1] %in% c("Dig", "Curl", "Slant") &
+            concept[2] %in% c("Dig", "Slant")) &
+           concept[3] %in% c("Seam", "Post", "Deep Cross")
+           ) 
+      return("Levels Bender")
+    
+  # Seam Trail 
+  else if (concept[2] %in% c("Deep Cross", "Seam") &
+           concept[3] %in% c("Go/Fly", "Fade", "Corner")
+          )
+    return("Seam Trail")
+  
+  # Seam Scissors 
+    # Scissors  - traditional
+  else if (concept[2] %in% c("Post", "Go/Fly", "Seam") &
+           concept[3] %in% c("Corner", "Out")
+           )
+    return("Seam Scissors")
+    # Stacks
+  else if ((concept[3] %in% c("Post", "Seam") &
+           concept[2] %in% c("Corner","Out")) &
+           ofp[2] == ofp[3]
+           )
+    return("Seam Scissors")
+    # Minus split
+  else if ((concept[1] %in% c("Post", "Seam") &
+            is_slot(ofp[1])) &
+           contains_route(c("Out","Corner"),concept[2:3])
+           )
+    return("Seam Scissors")
+  
+  # (Concept)  Y Cross
+  else if (concept[3] %in% c("Deep Cross", "Seam", "Post")) {
+    con2 <- con_namer_2(concept[1:2],ofp,back)
+    cross_con <- paste(con2,"Y Cross")
+    return(cross_con)
+  }
+  
+  # # 2-man concept
+  # else {
+  #   con2 <- concept_namer(concept_list)
+  #   return(con2)
+  # }
+
+  else {return("Unnamed")}
+}
+
+
+```
+
+
+```{r}
+#Function for parsing and evaluating left and right route combo data
+#Will be used on LeftIn and RightIn columns with lapply
+
+half_field_namer <- function(lr_string) {
+  #Split string back into strings for route combo, OFPs and directional back routes
+  info_vector <- str_split(lr_string,";")[[1]]
+  #split individual strings and store as a vector containing each element in order
+  #(i.e. "Curl,Corner,Flat - Right" becomes c("Curl", "Corner", "Flat - Right")
+  concept <- str_split(info_vector[1],",")[[1]]
+  ofps <- str_split(info_vector[2], ",")[[1]]
+  back_routes <- str_split(info_vector[3],",")[[1]]
+  #Find out how many routes are in the concept for sorting into the correct naming
+  #Function
+  num <- length(concept)
+  if (num == 1) {
+    #"NULL" return for no routes on that side
+    if (concept == "")
+      return("NULL")
+    #Preserve the name of iso routes
+    else
+      return(concept)
+  }
+  #Sort to 2-man concept namer
+  else if (num == 2) {con_namer_2(concept,ofps,back_routes)}
+  #Sort to 3-man concept namer
+  else if (num == 3) {con_namer_3(concept,ofps,back_routes)}
+  #Return original route string for 4-man concepts (All WR/TE)
+  else
+    return(info_vector[1])
+}
+```
+
+
+
+```{r}
+#Inspect and test split-field route concepts
+l_routes <- pass_data_eval %>%
+  select(LeftCombo,LeftIn,LeftLive) %>%
+  rename(Combo = LeftCombo, StringIn = LeftIn, LiveRoutes = LeftLive)
+
+r_routes <- pass_data_eval %>%
+  select(RightCombo, RightIn, RightLive) %>%
+  rename(Combo = RightCombo, StringIn = RightIn, LiveRoutes = RightLive)
+
+split_routes <- rbind(l_routes,r_routes) %>%
+  group_by(StringIn) %>%
+  mutate(n = n()) %>%
+  distinct() %>%
+  arrange(desc(n))
+
+split_routes3 <- filter(split_routes, LiveRoutes == 3)
+```
+
+```{r}
+
+split_routes3$ConName <- sapply(split_routes3$StringIn,half_field_namer)
+
+split_summary3 <- split_routes3 %>%
+  group_by(ConName) %>%
+  mutate(ConNum = sum(n)) %>%
+  arrange(desc(ConNum),ConName, desc(n))
+
+ss3 <- filter(split_summary3, ConName != "Unnamed",
+              str_detect(StringIn, "SWR,SWR,SWR"))
+
+unnamed <- filter(split_summary3, ConName == "Unnamed")
+
+```
+
+```{r}
+#Inspecting targeted Option concepts to determine whether all variations
+#should be grouped together
+
+pd2_targeted <- pass_data_eval %>%
+  filter(TargetLive == 2)
+
+pd2_targeted$LeftName <- sapply(pd2_targeted$LeftIn,half_field_namer)
+pd2_targeted$RightName <- sapply(pd2_targeted$RightIn,half_field_namer)
+
+hf_tarcon_filter <- function(data, con_name) {
+  tarcon_data <- data %>%
+    filter(((TargetSide == "L" & LeftName == con_name) |
+           (TargetSide == "R" & RightName == con_name)), 
+           TargetOrder != "NULL") %>%
+    mutate(TargetCombo = if_else(TargetSide == "L", LeftCombo, RightCombo))
+  return(tarcon_data)
+}
+
+depth_inspect_dt <- function(data, con_name) {
+  avg_depths <- hf_tarcon_filter(data, con_name) %>%
+    mutate(ThrowDepth = as.numeric(ThrowDepth)) %>%
+    group_by(DropType,TargetOrder,TargetRoute) %>%
+    summarise(AvgDepth = mean(ThrowDepth), n = n()) %>%
+    group_by(DropType) %>%
+    mutate(Drop_n = sum(n)) %>%
+    arrange(desc(Drop_n), DropType, TargetOrder)
+  return(avg_depths)
+}
+
+depth_inspect_combo <- function(data, con_name) {
+  avg_depths <- hf_tarcon_filter(data, con_name) %>%
+    mutate(ThrowDepth = as.numeric(ThrowDepth)) %>%
+    group_by(TargetCombo,TargetOrder,TargetRoute) %>%
+    summarise(AvgDepth = mean(ThrowDepth), n = n()) %>%
+    group_by(TargetCombo) %>%
+    mutate(Combo_n = sum(n)) %>%
+    arrange(desc(Combo_n), TargetCombo, TargetOrder)
+  return(avg_depths)
+}
+
+pd2_cocut <- depth_inspect(pd2_targeted, "Cocut")
+
+pd2_smash <- depth_inspect(pd2_targeted, "Smash")
+pd2_curl_flat <- depth_inspect(pd2_targeted, "Curl - Flat")
+pd2_smash_fade <- depth_inspect_combo(pd2_targeted, "Smash Fade")
+
+dig_fade <- hf_tarcon_filter(pd2_targeted,"Smash Fade") %>%
+  filter(TargetCombo == "Dig,Fade") %>%
+  select(TargetRoute,ThrowDepth) %>%
+  arrange(TargetRoute)
+  
+  
+  
+  
+  # summarise(n=n()) %>%
+  # group_by(CoverageScheme) %>%
+  # mutate(Cov_n = sum(n)) %>%
+  # group_by(CoverageScheme,TargetCombo) %>%
+  # mutate(Cvc_n = sum(n)) %>%
+  # arrange(desc(Cov_n),desc(Cvc_n),TargetCombo,TargetOrder)
+
+```
+
+
+
+```{r}
+#Identifies full-field concepts from split-field route vectors
+
+full_field_namer <- function(left_list, right_list, left_name, right_name) {
+  r_routes <- right_list[[1]]
+  l_routes <- left_list[[1]]
+  
+  #Mesh
+  if ((contains_route_and("Drag",l_routes,r_routes) |
+       check_opposite("Drag","Pick",l_routes,r_routes)) &
+      contains_route_or(c("Dig","Curl","Over Ball"),l_routes,r_routes))
+    return("Mesh")
+  
+  
+  #Spot Mesh
+  else if (check_opp_mix("Drag",c("Spot", "Spot Drag"),l_routes,
+                         r_routes,left_name,right_name)
+  )
+    return("Spot Mesh")
+  
+  #Mesh Sail
+  else if (contains_route_and("Drag",l_routes,r_routes) &
+           contains_route_or(c("Corner","Out"),l_routes,r_routes)
+           )
+    return("Mesh Sail")
+  
+  #Shallows
+  else if ((contains_route_and("Drag",l_routes,r_routes) |
+       check_opposite("Drag","Pick",l_routes,r_routes)))
+    return("Shallows")
+  
+  #Shilo
+  else if (check_opposite("Drag","Dig",l_routes,r_routes))
+    return("Shilo")
+  
+  #Cross Option
+  else if (check_opp_name("Option", "Cross",left_name,right_name))
+    return("Cross Option")
+  
+  #Viper / Dino
+  else if (check_opposite("Deep Cross", c("Post","Seam","Deep Cross"),
+                          l_routes,r_routes)) {
+    if (contains_route(c("Post","Seam"),l_routes) &
+        has_flat(l_routes))
+      return("Viper")
+    else if (contains_route(c("Post", "Seam"),r_routes) &
+             has_flat(r_routes))
+      return("Viper")
+    else
+      return("Dino")
+  }
+  
+  #Naked Slice
+  else if (contains_all_routes(c("Deep Cross","Beneath"),l_routes)) {
+    f_name <- paste("Naked",right_name)
+    return(f_name)
+  }
+  
+  else if (contains_all_routes(c("Deep Cross","Beneath"),r_routes)) {
+    f_name <- paste("Naked",left_name)
+    return(f_name)
+  }
+
+                          
+  else
+    return("NULL")
+}  
+```
+
+
+
+

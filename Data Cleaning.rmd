@@ -1,0 +1,199 @@
+---
+title: "Data Cleaning"
+author: "Mark Surma"
+date: "1/17/2022"
+output: html_document
+---
+
+```{r setup, message=FALSE}
+library(tidyverse)
+```
+
+```{r load_datal}
+#load data
+game_data <- read_csv("Data/GameInfo.csv")
+play_data <- read_csv("Data/PlayByPlay.csv")
+route_data <- read_csv("Data/SkillPositionPlayers.csv")
+```
+
+```{r}
+#Filter pass from play data
+
+pass_data <- play_data %>%
+  #Create scramble column so that they are included for concept popularity
+  mutate(Scram_bool = ifelse(str_detect(PlayDesc, "scramble"),1,0)) %>%
+  #Convert scrambles to pass play type
+  mutate(EventType = ifelse(Scram_bool == 1, "pass", EventType)) %>%
+  #Filter for pass play types, filter out spikes and abstract coverages
+  filter(EventType %in% c("pass", "challenge pass"), Spike %in% c(0,"NULL"),
+         ! CoverageScheme %in% c("Screen", "Spike", "Prevent"))
+```
+
+```{r}
+
+#Clean route data by condensing / fixing route info
+ rd_fixed <- route_data %>%
+  #Condense route info
+  mutate(Route = case_when(str_detect(Route, "Screen") ~ "Screen",
+                           Route == "Chip - Curl" ~ "Curl",
+                           Route == "Chip - Seam" ~ "Seam",
+                           Route == "Chip - Drag" ~ "Drag",
+                           Route %in% c("Blocking", "Chip") ~ "NULL",
+                           TRUE ~ Route)) %>%
+  #Change flats from opp side (no motion) to drag
+  mutate(Route = ifelse((Route == "Flat - Right" & SideOfCenter == "L") &
+                          FastMotion == 0,
+                        "Drag", Route)) %>%
+  mutate(Route = ifelse((Route == "Flat - Left" & SideOfCenter == "R") &
+                          FastMotion == 0,
+                        "Drag", Route)) %>%
+  #change flat/swing w/ motion to opp side and order == 4
+  mutate(Order_OutsideToInside = ifelse((Route %in% c("Flat - Right", 
+                                                      "Swing - Right") &
+                                 SideOfCenter == "L") &
+                                 FastMotion == 1,
+                               4, Order_OutsideToInside)) %>%
+  mutate(Order_OutsideToInside = ifelse((Route %in% c("Flat - Left", 
+                                             "Swing - Left") &
+                                 SideOfCenter == "R") &
+                                 FastMotion == 1,
+                               4, Order_OutsideToInside)) %>%
+  mutate(SideOfCenter = ifelse((Route %in% c("Flat - Right", 
+                                             "Swing - Right") &
+                                 SideOfCenter == "L") &
+                                 FastMotion == 1,
+                               "R", SideOfCenter)) %>%
+  mutate(SideOfCenter = ifelse((Route %in% c("Flat - Left", 
+                                             "Swing - Left") &
+                                 SideOfCenter == "R") &
+                                 FastMotion == 1,
+                               "L", SideOfCenter)) %>%
+  #change SideOfCenter for backs to B so that we can...
+  mutate(SideOfCenter = case_when(OnFieldPosition == "B" ~ "B",
+                                  TRUE ~ SideOfCenter)) %>%
+  #Count the number of receivers on the left, right and backfield ("distribution")
+  group_by(GameID, EventID, SideOfCenter) %>%
+  mutate(SideDist = n())
+
+#Adjust columns and some values to prepare for data pivot
+rd_clean <- rd_fixed %>%
+  #Change back-shoulders to fade here so the BS remains for targeted route
+  mutate(Route = case_when(str_detect(Route, "Shoulder") ~ "Fade",
+                           TRUE ~ Route)) %>%
+  #Remove QBs from the analysis. Will add back in later
+  filter(OnFieldPosition != "QB") %>%
+  #Combine side and order to a single code identifying WR location
+  unite(soc_ID, SideOfCenter, Order_OutsideToInside, sep = "") %>%
+  #Under that code, label the backfield routes B - B3 
+  mutate(soc_ID = case_when(soc_ID == "BNULL" ~ "B", TRUE ~ soc_ID)) %>%
+  arrange(GameID,EventID,soc_ID) %>%
+  mutate(soc_ID = case_when((soc_ID == "B" & lag(soc_ID) == "B") ~ "B2",
+                            TRUE ~ soc_ID)) %>%
+  mutate(soc_ID = case_when((soc_ID == "B2" & lag(soc_ID) == "B2") ~ "B3",
+                            TRUE ~ soc_ID)) %>%
+  #Remove all on-field position entries where route is null
+  mutate(OnFieldPosition = ifelse(Route == "NULL",NA,OnFieldPosition)) %>%
+  #Convert all null routes to NA
+  mutate(Route = ifelse(Route == "NULL", NA, Route)) %>%
+  #Binary column notating whether WR route is live or not for later use
+  mutate(LiveRoute = ifelse(is.na(Route),0,1))
+
+#Pivot wr loc code to variables with routes as the value
+rd_pivot_routes <- rd_clean %>%
+  pivot_wider(id_cols = c(GameID, EventID), names_from = soc_ID, 
+             values_from = Route, names_sort = TRUE) 
+
+#Pivot wr loc code to variables with on-field position as the value 
+rd_pivot_ofp <- rd_clean %>%
+  pivot_wider(id_cols = c(GameID, EventID), names_from = soc_ID, 
+             names_prefix = "OFP_", values_from = OnFieldPosition,
+             names_sort = TRUE) %>%
+  #No need for back position
+  select(c(-OFP_B, -OFP_B2, -OFP_B3))
+
+#Pivot one row each for l,r,b with distribution for that side as the value
+rd_pivot_dist <- rd_clean %>%
+  filter(soc_ID %in% c("L1","R1","B")) %>%
+  pivot_wider(id_cols = c(GameID, EventID), names_from = soc_ID,
+              values_from = SideDist, names_sort = TRUE) %>%
+  rename(c(Backs = B, LeftCount = L1, RightCount = R1))
+
+#Determine number of live routes per side per play using pivot function
+rd_pivot_live <- rd_clean %>%
+  pivot_wider(id_cols = c(GameID, EventID), names_from = soc_ID,
+              values_from = LiveRoute)
+rd_pivot_live[is.na(rd_pivot_live)] <- 0
+rd_pivot_live <- rd_pivot_live %>%
+  mutate(LeftLive = L1+L2+L3+L4) %>%
+  mutate(RightLive = R1+R2+R3+R4) %>%
+  mutate(BLive = B+B2+B3) %>%
+  select(LeftLive, RightLive, BLive)
+  
+
+#Join the pivoted dataframes - each observation represents a single play
+rd_pivot <- rd_pivot_routes %>%
+  left_join(rd_pivot_ofp, by = c("GameID", "EventID")) %>%
+  left_join(rd_pivot_dist, by = c("GameID", "EventID")) %>%
+  left_join(rd_pivot_live, by = c("GameID", "EventID"))
+  
+#Grab QB data to add to pass plays
+qb_data <- route_data %>%
+  filter(OnFieldPosition == "QB") %>%
+  select(GameID, EventID, PlayerId, Name) %>%
+  #Rename columns for clarity
+  rename(QBID = PlayerId, QBName = Name)
+
+#Prepare targeted receiver info for join next
+target <- rd_fixed %>%
+  #Want info on the targeted receiver
+  filter(Target == 1) %>%
+  select(GameID,EventID,PlayerId,Name,SideOfCenter,Order_OutsideToInside,
+         OnFieldPosition,Route) %>%
+  #Change backfield flat and swings to target in that direction
+  mutate(SideOfCenter = if_else(Route %in% c("Swing - Left", "Flat - Left"),
+                                             "L", SideOfCenter)) %>%
+  mutate(SideOfCenter = if_else(Route %in% c("Swing - Right", "Flat - Right"),
+                                             "R", SideOfCenter)) %>%
+  #Other backfield routes to "B"
+  mutate(SideOfCenter = case_when(SideOfCenter == "NULL" ~ "B",
+                                  TRUE ~ SideOfCenter)) %>%
+  #Rename columns for clarity
+  rename(c(TargetID = PlayerId, Target = Name, TargetSide = SideOfCenter, 
+           TargetOrder = Order_OutsideToInside, 
+           TargetOFP = OnFieldPosition, TargetRoute = Route))
+
+#Left join route data w/ filtered pass data. This filters out runs from rd_pivot
+pass_data_eval <- left_join(pass_data, rd_pivot, 
+                            by = c("GameID", "EventID")) %>%
+  #Combine back, left and right routes and positions to comma separated strings
+  unite(B_Routes, c(B,B2,B3), sep = ",", na.rm = TRUE) %>%
+  unite(LeftCombo, c(L1,L2,L3,L4), sep = ",", na.rm = TRUE) %>%
+  unite(RightCombo, c(R1,R2,R3,R4), sep = ",", na.rm = TRUE) %>%
+  #Add columns for back route strings containing either right or left releases
+  mutate(B_Left = ifelse(str_detect(B_Routes, "Left"), B_Routes, "")) %>%
+  mutate(B_Right = ifelse(str_detect(B_Routes, "Right"), B_Routes, "")) %>%
+  #Combine left and right OFPs to comma separated strings
+  unite(LeftPos, starts_with("OFP_L"), sep = ",", na.rm = TRUE) %>%
+  unite(RightPos, starts_with("OFP_R"), sep = ",", na.rm = TRUE) %>%
+  #Combine info for all routes and ofps for full-field evaluation, sep with ;
+  unite(FullIn, c(LeftCombo,LeftPos,RightCombo,RightPos,B_Routes),
+        sep = ";", remove = FALSE, na.rm = TRUE) %>%
+  #Combine info for left and right routes w/ their ofps and backfield routes
+  #in that direction
+  unite(LeftIn, c(LeftCombo,LeftPos,B_Left), sep = ";", remove = FALSE,
+        na.rm = TRUE) %>%
+  unite(RightIn, c(RightCombo,RightPos,B_Right), sep = ";", 
+        remove = FALSE, na.rm = TRUE) %>%
+  #Add in QB data
+  left_join(qb_data, by = c("GameID", "EventID")) %>%
+  #Add in target data
+  left_join(target, by = c("GameID", "EventID")) %>%
+  #Add column for number of live routes on target side
+  mutate(TargetLive = if_else(TargetSide == "L", LeftLive,
+                              if_else(TargetSide == "R", RightLive,1)))
+
+save(pass_data_eval,file = "pde.Rdata")
+
+#Route combos are ready to be sorted / named
+
+```
