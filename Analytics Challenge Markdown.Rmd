@@ -7,7 +7,12 @@ output: html_document
 
 ```{r setup, message=FALSE}
 library(tidyverse)
+# Load clean data frame
 load(file = "pde.Rdata")
+# Define common route groupings
+# Double moves
+dm <- c("Hitch & Go", "Stick - Nod", "Out & Up", "Sluggo",
+        "Corner Post", "Post Corner", "Jerk")
 ```
 
 ```{r}
@@ -119,145 +124,28 @@ is_bunch <- function(ofp) {
   return(FALSE)
 }
 
+#Boolean evaluates whether a route concept on one side of the field has a 
+#particular route from a receiver aligned in the slot or tighter
+has_slot_route <- function(rte_set,concept,ofp) {
+  if (contains_route(rte_set,concept)) {
+   routes <- data.frame(concept,ofp) %>%
+     filter(concept %in% rte_set & ofp %in% c("SWR","TE"))
+   if (nrow(routes) != 0)
+     return(TRUE)
+  }
+  return(FALSE)
+}
+
 ```
 
 ```{r}
 #Naming 2-man route concepts
 
-con_namer_2 <- function(concept,ofp,back) {
+con_namer_2 <- function(concept,ofp) {
   #First concepts that include the back to the flat
   
-  #Spacing
-  if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", "Angle", "Over Ball") &
-       concept[2] %in% c("Over Ball", "Pick", "Curl")) &
-      has_flat(back))
-    return("Spacing")
-  
-  #Spacing Whip
-  else if (contains_all_routes(c("Curl","Whip"),concept) &
-           has_flat(back))
-    return("Spacing Whip")
-
-  #Rub - Spacing where #2 route continues
-  else if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", "Drag", "Angle") &
-           concept[2] %in% c("Slant", "Dig", "Drag", "Angle")) &
-           has_flat(back))
-    return("Rub")
-
-  #Pick Lift
-  else if (((concept[1] %in% c("Go/Fly", "Fade", "Post", "Wheel") &
-            ofp[1] == "WR") &
-           concept[2] %in% c("Over Ball", "Pick", "Curl")) &
-           has_flat(back))
-    return("Pick Lift")
-
-  #Spot and Inverted
-  else if ((contains_route(c("Curl", "Pick", "Over Ball", "Dig"),concept) &
-            "Corner" %in% concept) &
-           has_flat(back))
-    return("Spot")
-
-  #Spot Wheel
-  else if ((contains_route(c("Curl", "Pick", "Over Ball"),concept) &
-            "Wheel" %in% concept) &
-           has_flat(back))
-    return("Spot Wheel")
-
-  #Spot Dig
-  else if ((concept[1] %in% c("Curl", "Pick", "Over Ball") &
-           concept[2] == "Dig") &
-           has_flat(back))
-    return("Spot Dig")
-
-  #Spot Drag
-  else if (contains_all_routes(c("Drag","Corner"),concept) &
-           has_flat(back))
-    return("Spot Drag")
-  
-  #Spot Sail
-  else if (contains_all_routes(c("Curl","Out"),concept) &
-           has_flat(back))
-    return("Spot Sail")
-
-  #Sail Drag
-  else if (contains_all_routes(c("Drag","Out"),concept) &
-           has_flat(back))
-    return("Sail Drag")
-
-  #Spot Basic Drag
-  else if (contains_all_routes(c("Drag","Dig"),concept) &
-           has_flat(back))
-    return("Spot Basic Drag")
-    # #2 Curl
-  else if (all(concept == c("Drag", "Curl")) &
-           has_flat(back))
-    return("Spot Basic Drag")
-  
-  #Spot Whip
-  else if (contains_all_routes(c("Corner","Whip"),concept) & 
-           has_flat(back))
-    return("Spot Whip")
-  
-  #Spot Dig Whip
-  else if (contains_all_routes(c("Dig","Whip"),concept) &
-           has_flat(back))
-    return("Spot Dig Whip")
-  
-  #Sail Whip
-  else if (contains_all_routes(c("Out","Whip"),concept) &
-           has_flat(back))
-    return("Sail Whip")
-  
-  #Spot Lift Whip
-  else if ((contains_route(c("Go/Fly","Fade","Post","Seam","Wheel"),concept) &
-            contains_route("Whip",concept)) &
-           has_flat(back))
-    return("Spot Lift Whip")
-  
-
-  #Slot Cross
-  else if ((concept[1] %in% c("Curl", "Dig", "Post") &
-            concept[2] %in% c("Seam", "Deep Cross", "Post")) &
-           has_flat(back))
-    return("Slot Cross")
-    #Stacks
-  else if ((contains_route(c("Curl","Dig","Post"),concept) &
-            contains_route(c("Seam", "Deep Cross"),concept)) &
-           (has_flat(back) &
-            ofp[1] == ofp[2]))
-    return("Slot Cross")
-  
-  #Spot Seam
-  else if ((contains_route(c("Curl","Over Ball", "Pick"),concept) &
-            contains_route(c("Post", "Seam"),concept)) &
-           has_flat(back))
-    return("Spot Seam")
-
-  #Flood
-  else if ((concept[1] %in% c("Go/Fly", "Post", "Fade") & ofp[1] == "WR") &
-            (concept[2] == "Out" &
-           has_flat(back)))
-    return("Flood")
-    #Inverted
-  else if (contains_all_routes(c("Out", "Wheel"),concept) &
-           has_flat(back))
-    return("Flood")
-    #Inverted smash flood (normal smash w/ flat is spot)
-  else if (contains_all_routes(c("Corner","Out"),concept) &
-           has_flat(back))
-    return("Flood")
-  
-  #Sail Lift (Flood w/ minus split in either order)
-  else if ((contains_route("Out",concept) &
-           contains_route(c("Go/Fly", "Fade", "Post", "Seam"), concept)) &
-           has_flat(back))
-    return("Sail Lift")
-           
-  #Now routes where there is no back release to that side and/or it is not
-  #relevant to the concept
-
   # Boot
-  else if (concept[1] == "Comeback" &
+  if (concept[1] == "Comeback" &
            (concept[2] == "Whip" |
            is_flat(concept[2])))
     return("Boot")
@@ -495,7 +383,7 @@ con_namer_2 <- function(concept,ofp,back) {
     
   
   # Vert Switch
-  else if (concept[1] %in% c("Post", "Seam", "Go/Fly", "Fade") &
+  else if (concept[1] %in% c("Post", "Seam", "Go/Fly", "Deep Cross") &
            concept[2] %in% c("Wheel", "Fade")
           )
     return("Vert Switch")
@@ -662,9 +550,9 @@ con_namer_2 <- function(concept,ofp,back) {
 ```{r}
 #Naming 3-man route concepts
 
-con_namer_3 <- function(concept,ofp,back) {
+con_namer_3 <- function(concept,ofp) {
   
-  # Start with concepts involving Drag routes.
+  # Start with concepts dependent on all 3 routes
   # The first involve concepts where the Drag is potentially an active
   # element on that side of the field
   
@@ -689,6 +577,12 @@ con_namer_3 <- function(concept,ofp,back) {
            )
     return("Rub")
   
+  # Rub Lift
+  else if ((concept[1] %in% c("Go/Fly", "Fade", "Post", "Wheel","Comeback") &
+           concept[2] %in% c("Slant", "Drag", "Angle")) &
+           is_flat(concept[3]))
+    return("Rub Lift")
+  
   # Spot Drag - normal
   else if (all(concept[1:2] == c("Drag", "Corner")) &
             is_flat(concept[3])
@@ -705,10 +599,16 @@ con_namer_3 <- function(concept,ofp,back) {
            (ofp[1] == ofp[2] & is_flat(concept[3]))
           )
     return("Spot Drag")
+    # #1 Whip replaces flat w/ minus split & Corner-Drag stacked
+  else if ((concept[1] == "Whip" & is_slot(ofp[1])) &
+           (contains_all_routes(c("Corner","Drag"),concept) &
+            ofp[2] == ofp[3])
+          )
+    return("Spot Drag")
     # Bunches
   else if ((contains_all_routes(c("Corner", "Drag"),concept) &
             is_bunch(ofp)) &
-            has_flat(concept)
+            (has_flat(concept) | "Whip" %in% concept)
            )
     return("Spot Drag")
   
@@ -722,15 +622,21 @@ con_namer_3 <- function(concept,ofp,back) {
            (all(concept[c(1,3)] == c("Drag", "Out")) & is_flat(concept[2]))
           )
     return("Sail Drag")
-    #Minus split, Out widest stacked w/ Drag
+    # Minus split, Out widest stacked w/ Drag
   else if ((all(concept[1:2] == c("Out", "Drag")) & is_slot(ofp[1])) &
            (ofp[1] == ofp[2] & is_flat(concept[3]))
+          )
+    return("Sail Drag")
+    # #1 Whip replaces flat w/ minus split & Out-Drag stacked
+  else if ((concept[1] == "Whip" & is_slot(ofp[1])) &
+           (contains_all_routes(c("Out","Drag"),concept) &
+            ofp[2] == ofp[3])
           )
     return("Sail Drag")
     # Bunches
   else if ((contains_all_routes(c("Out", "Drag"),concept) &
             is_bunch(ofp)) &
-            has_flat(concept)
+            (has_flat(concept) | "Whip" %in% concept)
            )
     return("Sail Drag")
   
@@ -744,6 +650,13 @@ con_namer_3 <- function(concept,ofp,back) {
   else if ((concept[1] == "Drag" & is_slot(ofp[1])) &
            ((concept[3] %in% c("Dig", "Curl") & is_flat(concept[2])) & 
             all(ofp[2:3] == c("TE","TE")))
+          )
+    return("Spot Basic Drag")
+    # #1 Whip replaces flat w/ minus split & Out-Drag stacked
+  else if ((concept[1] == "Whip" & is_slot(ofp[1])) &
+           ((contains_route(c("Dig","Curl"),concept) & 
+             "Whip" %in% concept) &
+            ofp[2] == ofp[3])
           )
     return("Spot Basic Drag")
     # Bunches
@@ -777,31 +690,23 @@ con_namer_3 <- function(concept,ofp,back) {
           )
     return("Monsoon")
   
-  
-
-  # Cruise
-  else if (concept[2] %in% c("Drag","Over Ball") &
-           concept[3] %in% c("Dig", "Curl", "Over Ball")
-           )
-    return("Cruise")
-    # Invert #2 and #3 w/  tight stack
-  else if ((concept[2] %in% c("Dig","Curl", "Over Ball") & 
-            concept[3]== "Drag") & 
-           all(ofp[2:3] == c("TE","TE"))
-          )
-    return("Cruise")
-    # Minus split #1 Drag
+  #Storm (Drag-Dig-Cross combos w/ minus split)
   else if ((concept[1] == "Drag" & is_slot(ofp[1])) &
-           contains_route(c("Dig", "Curl", "Over Ball"),concept)
+           contains_all_routes(c("Dig", "Deep Cross"),concept[2:3])
            )
-    return("Cruise")
-    # Tight Bunches
-  else if (("Drag" %in% concept &
-            contains_route(c("Dig", "Curl", "Over Ball"),concept)) &
-           all(ofp == "TE")
-          )
-    return("Cruise")
-  
+    return("Storm")
+    # #1 Cross w/ Dig and Drag stacked
+  else if ((concept[1] == "Deep Cross" & is_slot(ofp[1])) &
+           (contains_all_routes(c("Dig", "Drag"),concept[2:3]) &
+            ofp[2] == ofp[3])
+           )
+    return("Storm")
+    # Bunches
+  else if (contains_all_routes(c("Dig", "Drag","Deep Cross"),concept) &
+           (is_slot(ofp[1]) & is_bunch(ofp))
+           )
+    return("Storm")
+             
   # Steer
   else if (contains_all_routes(c("Over Ball", "Deep Cross"),concept[2:3]) &
            is_slot(ofp[2])
@@ -811,7 +716,7 @@ con_namer_3 <- function(concept,ofp,back) {
   else if (contains_all_routes(c("Over Ball", "Deep Cross"),concept) &
            is_slot(ofp[1])
           )
-    return("Steer")
+    return("Steer") 
   
   # Back-Side Boot
   else if (contains_all_routes(c("Drag", "Deep Cross"),concept[2:3]) &
@@ -824,28 +729,84 @@ con_namer_3 <- function(concept,ofp,back) {
           )
     return("Back-Side Boot")
   
+  # Fan
+  else if ((concept[1] == "Out" | is_flat(concept[1])) &
+           (con_namer_2(concept[2:3],ofp[2:3]) == "Spacer" & is_slot(ofp[1]))
+          )
+    return("Fan")
+  
+  # Cruise Lift (Inside Drive w/ slot vertical)
+  else if ((concept[1] == "Drag" & is_slot(ofp[1])) &
+           (contains_route(c("Dig","Curl","Over Ball"),concept) &
+            contains_route(c("Go/Fly", "Fade"),concept))
+           )
+    return("Cruise Lift")
+    # Tight bunch
+  else if (("Drag" %in% concept & all(ofp == "TE")) &
+           (contains_route(c("Dig","Curl","Over Ball"),concept) &
+            contains_route(c("Go/Fly", "Fade"),concept))
+           )
+    return("Cruise Lift")
+  
+  # Out Cruise
+  else if ((concept[3] %in% c("Dig", "Curl", "Over Ball") &
+           contains_route(c("Drag","Over Ball"),concept)) &
+           ("Out" %in% concept & is_slot(ofp[1]))
+           )
+    return("Out Cruise")
+    # Invert #2 and #3 w/ tight stack
+  else if ((concept[3] %in% c("Drag","Over Ball") &
+           (concept[2] %in% c("Dig", "Curl", "Over Ball") & 
+            all(ofp[2:3] == "TE"))) &
+           ("Out" %in% concept & is_slot(ofp[1]))
+           )
+    return("Out Cruise")
+  
+  # (Double Move) Cruise
+  else if ((concept[2] %in% c("Drag","Over Ball") & is_slot(ofp[2])) &
+           (concept[3] %in% c("Dig", "Curl", "Over Ball") &
+            concept[1] %in% dm)
+           )
+    return(paste(concept[1],"Cruise"))
+  # Invert #2 and #3 w/ tight stack 
+  else if ((concept[3] %in% c("Drag", "Over Ball") & all(ofp[2:3] == "TE")) &
+           (concept[2] %in% c("Dig", "Curl", "Over Ball") &
+            concept[1] %in% dm)
+           )
+    return(paste(concept[1],"Cruise"))
+    # Minus split #1 Drag
+  else if ((concept[1] %in% c("Drag","Over Ball") & is_slot(ofp[1])) &
+           (contains_route(c("Dig", "Curl", "Over Ball"),concept) &
+            contains_route(dm,concept))
+           )
+    return(paste(intersect(concept,dm),"Cruise"))
+
+  # Cruise (Inside Drive)
+  else if ((concept[2] %in% c("Drag","Over Ball") & ofp[1] != ofp[2]) &
+           concept[3] %in% c("Dig", "Curl", "Over Ball")
+           )
+    return("Cruise")
+    # Invert #2 and #3 w/  tight stack
+  else if ((concept[3] %in% c("Drag", "Over Ball") & all(ofp[2:3] == "TE")) &
+           concept[2] %in% c("Dig", "Curl", "Over Ball")
+           )
+    return("Cruise")
+    # Minus split #1 Drag w/ Wheel
+  else if ((concept[1] %in% c("Drag","Over Ball") & is_slot(ofp[1])) &
+           (contains_route(c("Dig", "Curl", "Over Ball"),concept) &
+            "Wheel" %in% concept)
+           )
+    return("Cruise")
+  
   # Next remove "Drag" from certain concepts and send the remainder
   # to the 2-man concept namer
-  
 
-  # #3 Drag w/ back to flat
-  else if ((concept[3] == "Drag" & is_slot(ofp[3])) &
-      has_flat(back)) {
-    name <- con_namer_2(concept[1:2], ofp[1:2], back)
-    return(paste(name, "Drag"))
-  }
-  # #2 or #3 Drag out of slot or tight bunch
-  else if (contains_route("Drag",concept[2:3]) & is_bunch(ofp)) {
+  else if (has_slot_route("Drag",concept,ofp)) {
     i <- max(which(concept == "Drag"))
-    name <- con_namer_2(concept[-i],ofp[-i],back)
-    return(paste(name, "Drag"))
+    name <- con_namer_2(concept[-i],ofp[-i])
+    return(paste(name, "Shallow"))
   }
-  # #1 Drag out of slot or tight bunch w/ back to flat
-  else if ((concept[1] == "Drag" & is_bunch(ofp)) &
-      has_flat(back)) {
-    name <- con_namer_2(concept[2:3], ofp[2:3], back)
-    return(paste(name, "Drag"))
-  }
+
   
   # Now concepts determined by all 3 routes
   
@@ -935,7 +896,7 @@ con_namer_3 <- function(concept,ofp,back) {
     return("Stick")
     #Inverted w/ tight stack
   else if ((concept[1] %in% c("Go/Fly", "Fade", "Wheel") & 
-            all(ofp == c("WR","TE","TE"))) &
+            all(ofp[1:2] == c("WR","TE"))) &
           (is_flat(concept[3]) &
             concept[2] %in% c("Out", "Curl"))
           )
@@ -960,7 +921,7 @@ con_namer_3 <- function(concept,ofp,back) {
           )
     return ("Hitches")
   
-    # Spacing
+  # Spacing
   else if ((concept[1] %in% c("Curl", "Dig", "Pick", "Slant", 
                               "Angle", "Over Ball") &
        concept[2] %in% c("Over Ball", "Pick", "Curl")) &
@@ -1175,8 +1136,6 @@ con_namer_3 <- function(concept,ofp,back) {
            )
     return("Flood")
   
-
-  
   # Swivel (Slot/inside pivot)
   else if ((concept[1] %in% c("Post", "Go/Fly", "Seam", "Wheel") &
             concept[2] %in% c("Dig", "Curl", "Slant")) & 
@@ -1275,7 +1234,7 @@ con_namer_3 <- function(concept,ofp,back) {
   
   # (Concept)  Y Cross
   else if (concept[3] %in% c("Deep Cross", "Seam", "Post")) {
-    con2 <- con_namer_2(concept[1:2],ofp,back)
+    con2 <- con_namer_2(concept[1:2],ofp)
     cross_con <- paste(con2,"Y Cross")
     return(cross_con)
   }
@@ -1292,6 +1251,26 @@ con_namer_3 <- function(concept,ofp,back) {
 
 ```
 
+```{r}
+#Function for naming route concepts with 4 active routes
+
+con_namer_4 <- function(concept,ofp) {
+  # #3 Drag w/ back to flat
+  if ((concept[3] == "Drag" & is_slot(ofp[3])) &
+      is_flat(concept[4])) {
+    name <- con_namer_3(concept[c(1,2,4)], ofp[c(1,2,4)])
+    return(paste(name, "Shallow"))
+  }
+
+  # #1 Drag out of slot or tight bunch w/ back to flat
+  else if ((concept[1] == "Drag" & is_bunch(ofp[1:3])) &
+      is_flat(concept[4])) {
+    name <- con_namer_3(concept[2:4], ofp[2:4])
+    return(paste(name, "Drag"))
+  }
+}
+
+```
 
 ```{r}
 #Function for parsing and evaluating left and right route combo data
@@ -1308,6 +1287,12 @@ half_field_namer <- function(lr_string) {
   #Find out how many routes are in the concept for sorting into the correct naming
   #Function
   num <- length(concept)
+  #Add the back to the flat to the concept for naming purposes
+  if (! contains_route("",back_routes)) {
+    concept <- c(concept,"Flat")
+    ofps <- c(ofps,"B")
+    num <- num + 1
+  }
   if (num == 1) {
     #"NULL" return for no routes on that side
     if (concept == "")
@@ -1317,9 +1302,9 @@ half_field_namer <- function(lr_string) {
       return(concept)
   }
   #Sort to 2-man concept namer
-  else if (num == 2) {con_namer_2(concept,ofps,back_routes)}
+  else if (num == 2) {con_namer_2(concept,ofps)}
   #Sort to 3-man concept namer
-  else if (num == 3) {con_namer_3(concept,ofps,back_routes)}
+  else if (num == 3) {con_namer_3(concept,ofps)}
   #Return original route string for 4-man concepts (All WR/TE)
   else
     return(info_vector[1])
@@ -1344,11 +1329,26 @@ split_routes <- rbind(l_routes,r_routes) %>%
   distinct() %>%
   arrange(desc(n))
 
+split_routes2 <- filter(split_routes, LiveRoutes == 2)
 split_routes3 <- filter(split_routes, LiveRoutes == 3)
 ```
 
 ```{r}
 
+split_routes2$ConName <- sapply(split_routes2$StringIn,half_field_namer)
+
+split_summary2 <- split_routes2 %>%
+  group_by(ConName) %>%
+  mutate(ConNum = sum(n)) %>%
+  arrange(desc(ConNum),ConName, desc(n))
+
+ss2 <- filter(split_summary2, ConName != "Unnamed")
+
+unnamed2 <- filter(split_summary2, ConName == "Unnamed")
+
+```
+
+```{r}
 split_routes3$ConName <- sapply(split_routes3$StringIn,half_field_namer)
 
 split_summary3 <- split_routes3 %>%
@@ -1356,12 +1356,11 @@ split_summary3 <- split_routes3 %>%
   mutate(ConNum = sum(n)) %>%
   arrange(desc(ConNum),ConName, desc(n))
 
-ss3 <- filter(split_summary3, ConName != "Unnamed",
-              str_detect(StringIn, "SWR,SWR,SWR"))
+ss3 <- filter(split_summary3, ConName != "Unnamed")
 
-unnamed <- filter(split_summary3, ConName == "Unnamed")
-
+unnamed3 <- filter(split_summary3, ConName == "Unnamed")
 ```
+
 
 ```{r}
 #Inspecting targeted Option concepts to determine whether all variations
